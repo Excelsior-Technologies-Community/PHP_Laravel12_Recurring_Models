@@ -35,26 +35,45 @@ class EventController extends Controller
     // ===============================
     public function store(Request $request)
     {
-        // Validation
         $validator = Validator::make($request->all(), [
+
             'title' => 'required|string|max:255',
+
             'description' => 'nullable|string',
-            'type' => 'required|in:today,daily,weekly,2days'
+
+            'type' => 'required|in:today,daily,weekly,2days',
+
+            'priority' => 'required|in:High,Medium,Low'
+
         ]);
 
         if ($validator->fails()) {
-            return redirect()->back()->withErrors($validator)->withInput();
+            return redirect()
+                ->back()
+                ->withErrors($validator)
+                ->withInput();
         }
 
-        $event = Event::create([
+        Event::create([
+
             'title' => $request->title,
+
             'description' => $request->description,
-            'type' => $request->type
+
+            'type' => $request->type,
+
+            'priority' => $request->priority,
+
+            'status' => 'Pending'
+
         ]);
 
-        return redirect('/')->with('success', 'Event created successfully!');
+        return redirect('/')
+            ->with(
+                'success',
+                'Event created successfully!'
+            );
     }
-
     // ===============================
     // EDIT FORM
     // ===============================
@@ -71,23 +90,45 @@ class EventController extends Controller
     {
         $event = Event::findOrFail($id);
 
-        $validator = Validator::make($request->all(), [
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'type' => 'required|in:today,daily,weekly,2days'
-        ]);
+        $validator = Validator::make(
+            $request->all(),
+            [
+
+                'title' => 'required|string|max:255',
+
+                'description' => 'nullable|string',
+
+                'type' => 'required|in:today,daily,weekly,2days',
+
+                'priority' => 'required|in:High,Medium,Low'
+
+            ]
+        );
 
         if ($validator->fails()) {
-            return redirect()->back()->withErrors($validator)->withInput();
+            return redirect()
+                ->back()
+                ->withErrors($validator)
+                ->withInput();
         }
 
         $event->update([
+
             'title' => $request->title,
+
             'description' => $request->description,
-            'type' => $request->type
+
+            'type' => $request->type,
+
+            'priority' => $request->priority
+
         ]);
 
-        return redirect('/')->with('success', 'Event updated successfully!');
+        return redirect('/')
+            ->with(
+                'success',
+                'Event updated successfully!'
+            );
     }
 
     // ===============================
@@ -171,16 +212,16 @@ class EventController extends Controller
     public function search(Request $request)
     {
         $search = $request->input('search');
-        
+
         if (empty($search)) {
             return redirect('/');
         }
-        
+
         $events = Event::where('title', 'like', "%{$search}%")
-                       ->orWhere('description', 'like', "%{$search}%")
-                       ->orderBy('created_at', 'desc')
-                       ->get();
-        
+            ->orWhere('description', 'like', "%{$search}%")
+            ->orderBy('created_at', 'desc')
+            ->get();
+
         $message = "Search results for: '{$search}'";
         return view('events.result', ['data' => $events, 'message' => $message]);
     }
@@ -190,55 +231,118 @@ class EventController extends Controller
     // ===============================
     public function dateRange(Request $request)
     {
-        $from = $request->input('from') ? Carbon::parse($request->from) : Carbon::today()->subDays(30);
-        $to = $request->input('to') ? Carbon::parse($request->to) : Carbon::today();
-        
-        $events = Event::whereBetween('created_at', [$from, $to])
-                       ->orderBy('created_at', 'desc')
-                       ->get();
-        
-        $message = "Events from {$from->format('M d, Y')} to {$to->format('M d, Y')}";
-        return view('events.result', ['data' => $events, 'message' => $message]);
+        $query = Event::query();
+
+        if ($request->filled('from')) {
+
+            $from = Carbon::parse($request->from)
+                ->startOfDay();
+
+            $query->where(
+                'created_at',
+                '>=',
+                $from
+            );
+        }
+
+        if ($request->filled('to')) {
+
+            $to = Carbon::parse($request->to)
+                ->endOfDay();
+
+            $query->where(
+                'created_at',
+                '<=',
+                $to
+            );
+        }
+
+        $events = $query
+            ->latest()
+            ->get();
+
+        $message = "Filtered Events";
+
+        return view(
+            'events.result',
+            [
+                'data' => $events,
+                'message' => $message
+            ]
+        );
     }
 
+    // ===============================
+    // EXPORT TO CSV
+    // ===============================
     // ===============================
     // EXPORT TO CSV
     // ===============================
     public function exportCsv()
     {
         $events = Event::all();
-        
+
         $filename = "events_" . date('Y-m-d_H-i-s') . ".csv";
-        
+
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=\"$filename\"",
         ];
-        
-        $callback = function() use ($events) {
+
+        $callback = function () use ($events) {
+
             $file = fopen('php://output', 'w');
-            
-            // Add UTF-8 BOM for Excel compatibility
-            fprintf($file, chr(0xEF).chr(0xBB).chr(0xBF));
-            
-            // Add headers
-            fputcsv($file, ['ID', 'Title', 'Description', 'Type', 'Created Date']);
-            
-            // Add data rows
+
+            // UTF-8 for Excel
+            fprintf(
+                $file,
+                chr(0xEF) . chr(0xBB) . chr(0xBF)
+            );
+
+            // CSV Header
+            fputcsv($file, [
+
+                'ID',
+                'Title',
+                'Description',
+                'Type',
+                'Priority',
+                'Status',
+                'Created Date'
+
+            ]);
+
+            // Data
             foreach ($events as $event) {
+
                 fputcsv($file, [
+
                     $event->id,
+
                     $event->title,
+
                     $event->description,
-                    $event->type,
-                    $event->created_at->format('Y-m-d H:i:s')
+
+                    ucfirst($event->type),
+
+                    $event->priority ?? 'Low',
+
+                    $event->status ?? 'Pending',
+
+                    $event->created_at
+                        ->format('Y-m-d H:i:s')
+
                 ]);
             }
-            
+
             fclose($file);
         };
-        
-        return response()->stream($callback, 200, $headers);
+
+        return response()->stream(
+            $callback,
+            200,
+            $headers
+        );
     }
 
     // ===============================
@@ -247,20 +351,43 @@ class EventController extends Controller
     public function duplicate($id)
     {
         try {
-            $originalEvent = Event::findOrFail($id);
-            
+
+            $originalEvent =
+                Event::findOrFail($id);
+
             Event::create([
-                'title' => $originalEvent->title . " (Copy)",
-                'description' => $originalEvent->description,
-                'type' => $originalEvent->type,
+
+                'title' =>
+                $originalEvent->title
+                    . ' (Copy)',
+
+                'description' =>
+                $originalEvent->description,
+
+                'type' =>
+                $originalEvent->type,
+
+                'priority' =>
+                $originalEvent->priority,
+
+                'status' => 'Pending'
+
             ]);
-            
-            return redirect('/')->with('success', 'Event duplicated successfully!');
+
+            return redirect('/')
+                ->with(
+                    'success',
+                    'Event duplicated successfully!'
+                );
         } catch (\Exception $e) {
-            return redirect('/')->with('error', 'Could not duplicate event!');
+
+            return redirect('/')
+                ->with(
+                    'error',
+                    'Could not duplicate'
+                );
         }
     }
-
     // ===============================
     // TOGGLE IMPORTANT (using description)
     // ===============================
@@ -268,10 +395,10 @@ class EventController extends Controller
     {
         try {
             $event = Event::findOrFail($id);
-            
+
             // Check if already important
             $isImportant = strpos($event->description, '⭐ IMPORTANT') !== false;
-            
+
             if ($isImportant) {
                 $event->description = str_replace(' ⭐ IMPORTANT', '', $event->description);
                 $event->description = str_replace('⭐ IMPORTANT', '', $event->description);
@@ -280,9 +407,9 @@ class EventController extends Controller
                 $event->description = trim($event->description) . ' ⭐ IMPORTANT';
                 $message = 'Marked as important!';
             }
-            
+
             $event->save();
-            
+
             return redirect()->back()->with('success', $message);
         } catch (\Exception $e) {
             return redirect()->back()->with('error', 'Could not update event!');
@@ -295,7 +422,7 @@ class EventController extends Controller
     public function summary()
     {
         $events = Event::all();
-        
+
         $summary = [
             'total' => $events->count(),
             'today' => $events->where('type', 'today')->count(),
@@ -304,7 +431,7 @@ class EventController extends Controller
             'two_days' => $events->where('type', '2days')->count(),
             'recent' => $events->take(5),
         ];
-        
+
         return view('events.summary', compact('summary'));
     }
 
@@ -313,29 +440,44 @@ class EventController extends Controller
     // ===============================
     public function quickAdd(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'title' => 'required|string|max:255',
-            'type' => 'required|in:today,daily,weekly,2days'
-        ]);
+        $validator = Validator::make(
+            $request->all(),
+            [
+
+                'title' => 'required',
+
+                'type' =>
+                'required|in:today,daily,weekly,2days'
+
+            ]
+        );
 
         if ($validator->fails()) {
-            if ($request->ajax()) {
-                return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
-            }
-            return redirect()->back()->withErrors($validator)->withInput();
+            return redirect()
+                ->back()
+                ->withErrors($validator);
         }
-        
-        $event = Event::create([
+
+        Event::create([
+
             'title' => $request->title,
-            'description' => $request->input('description', ''),
+
+            'description' =>
+            $request->description,
+
             'type' => $request->type,
+
+            'priority' => 'Medium',
+
+            'status' => 'Pending'
+
         ]);
-        
-        if ($request->ajax()) {
-            return response()->json(['success' => true, 'event' => $event]);
-        }
-        
-        return redirect('/')->with('success', 'Event added quickly!');
+
+        return redirect('/')
+            ->with(
+                'success',
+                'Quick event added'
+            );
     }
 
     // ===============================
@@ -344,25 +486,27 @@ class EventController extends Controller
     public function complete($id)
     {
         try {
-            $event = Event::findOrFail($id);
-            
-            // If it's a recurring event, create next occurrence
-            if ($event->type != 'today') {
-                Event::create([
-                    'title' => $event->title,
-                    'description' => $event->description,
-                    'type' => $event->type,
-                ]);
-                $message = 'Event completed! Next occurrence created.';
-            } else {
-                $message = 'Event completed!';
-            }
-            
-            $event->delete();
-            
-            return redirect('/')->with('success', $message);
+
+            $event =
+                Event::findOrFail($id);
+
+            $event->status =
+                'Completed';
+
+            $event->save();
+
+            return redirect('/')
+                ->with(
+                    'success',
+                    'Event marked completed!'
+                );
         } catch (\Exception $e) {
-            return redirect('/')->with('error', 'Could not complete event!');
+
+            return redirect('/')
+                ->with(
+                    'error',
+                    'Could not complete event'
+                );
         }
     }
 }
