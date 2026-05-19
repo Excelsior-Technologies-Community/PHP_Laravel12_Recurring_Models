@@ -12,7 +12,13 @@ class Event extends Model implements RepeatableContract
 {
     use Repeatable;
 
-    protected $fillable = ['title', 'description', 'type'];
+    protected $fillable = [
+        'title',
+        'description',
+        'type',
+        'priority',
+        'status'
+    ];
 
     public function repetitionBaseDate(?RepetitionType $type = null): CarbonInterface
     {
